@@ -1,0 +1,31 @@
+From: buildroot_optee
+Subject: [PATCH] cmd: booti: let measured boot actually hash the kernel Image
+
+bootm_measure() hashes images->os.image_start / images->os.image_len
+into PCR8.  bootm sets those in bootm_find_os(), but booti (raw Image,
+the extlinux/sysboot path) never does: they stay 0, map_sysmem(0, 0)
+returns NULL and tcg2_measure_data() then silently falls back to
+hashing the *event name*, so PCR8 == extend(sha256("linux\0")) no
+matter which kernel was booted.  (Verified on QEMU riscv64 + swtpm:
+PCR8 was BE624459... for every kernel; same code in U-Boot 2024.01.)
+
+Record the relocated image and its header image_size so the
+measurement covers the kernel (text+data, zero-padded to image_size).
+
+--- a/cmd/booti.c
++++ b/cmd/booti.c
+@@ -86,6 +86,14 @@ static int booti_start(struct bootm_info *bmi)
+ 	images->ep = relocated_addr;
+ 	images->os.start = relocated_addr;
+ 	images->os.end = relocated_addr + image_size;
++	/*
++	 * bootm_measure() (BOOTM_STATE_MEASURE) hashes os.image_start /
++	 * os.image_len; nothing else on the booti path sets them, and with
++	 * them left at 0 the measurement degenerates to a hash of the
++	 * "linux" event string instead of the kernel.
++	 */
++	images->os.image_start = relocated_addr;
++	images->os.image_len = image_size;
+ 
+ 	lmb_reserve(images->ep, le32_to_cpu(image_size));
+ 

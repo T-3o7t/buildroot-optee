@@ -1,0 +1,13 @@
+config BR2_PACKAGE_MAN_PAGES
+	bool "man-pages"
+	help
+	  The Linux man-pages project: manual pages for the Linux
+	  kernel and C library interfaces (sections 2, 3, 4, 5, 7, 8).
+	  Installs the roff sources to /usr/share/man; a viewer such
+	  as mandoc is needed to read them.
+
+	  Note: Buildroot removes /usr/share/man from the target at
+	  target-finalize, so pages must be put back by a post-build
+	  script (see board/qemu/riscv64-virt-optee-tpm/post-build.sh).
+
+	  https://www.kernel.org/doc/man-pages/

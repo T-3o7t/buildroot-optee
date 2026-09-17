@@ -1,0 +1,25 @@
+config BR2_PACKAGE_GCC_TARGET
+	bool "gcc (native compiler on the target)"
+	depends on BR2_TOOLCHAIN_BUILDROOT # same gcc sources / tuple
+	depends on BR2_USE_WCHAR
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	depends on BR2_USE_MMU
+	select BR2_PACKAGE_BINUTILS
+	select BR2_PACKAGE_BINUTILS_TARGET
+	select BR2_PACKAGE_GMP
+	select BR2_PACKAGE_MPFR
+	select BR2_PACKAGE_MPC
+	help
+	  A native C/C++ compiler running ON the target (a Canadian
+	  cross of the same gcc used for the internal toolchain).
+
+	  This lets you compile programs on the device itself.  It
+	  pulls in binutils (as/ld) on the target, and a post-build
+	  script must install the libc headers and startup objects
+	  (see board/qemu/riscv64-virt-optee-tpm/post-build.sh).
+
+	  Note: this is a large package and a long build.
+
+comment "gcc-target needs a buildroot (internal) toolchain w/ wchar, threads"
+	depends on BR2_USE_MMU
+	depends on !BR2_TOOLCHAIN_BUILDROOT || !BR2_USE_WCHAR || !BR2_TOOLCHAIN_HAS_THREADS

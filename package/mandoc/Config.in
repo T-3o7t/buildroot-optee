@@ -1,0 +1,17 @@
+config BR2_PACKAGE_MANDOC
+	bool "mandoc"
+	depends on BR2_USE_MMU # fork()
+	select BR2_PACKAGE_ZLIB
+	help
+	  mandoc is a suite of tools compiling mdoc(7) and man(7),
+	  the roff macro languages of choice for manual pages. It
+	  provides a complete, self-contained man(1) implementation
+	  (man, apropos, whatis, makewhatis, mandoc, demandoc, soelim)
+	  without needing groff.
+
+	  Note: Buildroot removes /usr/share/man from the target at
+	  target-finalize, so pages must be put back by a post-build
+	  script (see board/qemu/riscv64-virt-optee-tpm/post-build.sh)
+	  or installed elsewhere in the manpath.
+
+	  https://mandoc.bsd.lv/

@@ -1,0 +1,8 @@
+config BR2_PACKAGE_HOST_MANDOC
+	bool "host mandoc"
+	help
+	  mandoc for the host: makewhatis(8) is used to build the
+	  target's mandoc.db (apropos/whatis index) at image
+	  build time, plus mandoc(1) to preformat or check pages.
+
+	  https://mandoc.bsd.lv/

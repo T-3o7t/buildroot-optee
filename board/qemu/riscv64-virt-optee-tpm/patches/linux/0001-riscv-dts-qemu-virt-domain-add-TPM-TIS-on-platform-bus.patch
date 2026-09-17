@@ -1,0 +1,34 @@
+From: buildroot_optee
+Subject: [PATCH] riscv: dts: qemu_rv64_virt_domain: add TPM TIS node on the platform bus
+
+QEMU's riscv virt machine places dynamic sysbus devices such as
+"-device tpm-tis-device,tpmdev=tpm0" on the platform bus at 0x4000000,
+but only describes them in its own generated FDT.  When the guest is
+booted with a user supplied "-dtb" (as the OP-TEE domain setup needs),
+QEMU skips that and the DTB must carry the node itself.
+
+The node matches what QEMU generates (dtc -I dtb of "-machine
+dumpdtb=") for the first platform-bus slot.
+
+tpm_event_log_addr/size are consumed by U-Boot's measured boot
+(lib/tpm_tcg2.c tcg2_platform_get_log()); without them bootm_measure()
+silently measures nothing.  0x82400000/64KiB sits between U-Boot's
+TEXT_BASE (0x81200000) and kernel_addr_r (0x84000000).
+
+--- a/arch/riscv/boot/dts/qemu/qemu_rv64_virt_domain.dts
++++ b/arch/riscv/boot/dts/qemu/qemu_rv64_virt_domain.dts
+@@ -26,6 +26,14 @@
+ 		#address-cells = <0x01>;
+ 		#size-cells = <0x01>;
+ 		compatible = "qemu,platform\0simple-bus";
++
++		/* qemu: -device tpm-tis-device,tpmdev=tpm0 (backend: swtpm) */
++		tpm_tis@0 {
++			reg = <0x00 0x5000>;
++			compatible = "tcg,tpm-tis-mmio";
++			tpm_event_log_addr = <0x0 0x82400000>;
++			tpm_event_log_size = <0x10000>;
++		};
+ 	};
+ 
+ 	memory@80000000 {
