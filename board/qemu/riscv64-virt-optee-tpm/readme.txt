@@ -72,6 +72,14 @@ Note: without patches/uboot/0001-cmd-booti-*.patch (i.e. stock U-Boot, also
 keystone's 2024.01) PCR8 is a constant BE624459... = extend(sha256("linux\0"))
 because booti never tells bootm_measure() where the kernel is.
 
+OpenSBI FP context (patches/opensbi/): stock OpenSBI's domain context switch
+swaps GPRs and S-mode CSRs but not f0-f31/fcsr, and OP-TEE's riscv port does
+not save FP state either, so hard-float TAs get their FP registers clobbered
+when Linux runs FP code while the TA is preempted.  Symptom: xtest
+regression_1006 fails intermittently with TEEC_ERROR_GENERIC and
+"E/TA: test_float:... failed" in the OP-TEE log.  The patch saves/restores
+the FP registers on every domain switch.
+
 Debug:
 
   $ qemu-system-riscv ... -S -gdb tcp::4680

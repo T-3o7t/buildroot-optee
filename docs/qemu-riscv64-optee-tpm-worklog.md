@@ -22,6 +22,8 @@ Buildroot の設定は `~/github/keystone` の
 |---|---|
 | `0e79bda942` | `configs: add qemu_riscv64_virt_optee_tpm (swtpm TPM 2.0 + native gcc)` |
 | `d3c621396e` | `package/optee-selftest: add custom TA + host self-test app` |
+| `47cf5bb055` | `docs: add qemu_riscv64_virt_optee_tpm work log; fix run-qemu.sh notes` |
+| （今回） | OpenSBI: ドメイン切り替えで FPU レジスタを保存・復元（xtest 1006 修正、4.7 参照） |
 
 ### 追加・変更したファイル
 
@@ -33,6 +35,7 @@ board/qemu/riscv64-virt-optee-tpm/
 ├── uboot-tpm.config            # U-Boot TPM / measured boot
 ├── patches/linux/0001-riscv-dts-qemu-virt-domain-add-TPM-TIS-on-platform-bus.patch
 ├── patches/uboot/0001-cmd-booti-let-measured-boot-actually-hash-the-kernel.patch
+├── patches/opensbi/0001-lib-sbi-domain-context-save-and-restore-FP-registers.patch
 ├── post-build.sh               # man / 開発用ファイルの復元
 ├── rootfs_overlay/boot/extlinux/extlinux.conf
 ├── rootfs_overlay/etc/fstab
@@ -178,6 +181,48 @@ Buildroot にはターゲット上で動くツールチェーンがないため�
 `optee_selftest` は各項目を `[PASS]` / `[FAIL]` で表示し、失敗があれば非ゼロで終了する。
 ゲスト上で 4 項目すべて PASS を確認済み。
 
+### 4.7 xtest regression_1006 の間欠的な失敗（OpenSBI の FPU レジスタ未保存）
+
+**症状**: フル `xtest` を実行すると、ときどき 1 件だけ失敗する（あるゲストでは 3 回中 1 回程度）。
+
+```
+regression_1000.c:641: TEEC_InvokeCommand(&session, 5, &op, &ret_orig)
+  → 0xffff0000 = TEEC_ERROR_GENERIC
+112 test cases of which 1 failed
+```
+
+失敗したときの OP-TEE ログ（semihosting、QEMU の標準出力）:
+
+```
+E/TA:  test_float:698 Expression my_dcmpeq(test_float_f2d(VAL1), VAL1, FPREC) failed
+```
+
+**原因**: TA の浮動小数点レジスタが Linux 側に書き換えられていた。
+
+- TA はハードウェア浮動小数点でビルドされる（`-march=rv64imafdc -mabi=lp64d`、`CFG_TA_FLOAT_SUPPORT=y`）
+- optee_os の RISC-V ポートは FPU コンテキストを保存しない（`CFG_WITH_VFP` は
+  `static_assert(!IS_ENABLED(CFG_WITH_VFP))` で未対応）
+- Linux ⇔ OP-TEE のドメイン切り替えをする OpenSBI の
+  `switch_to_next_domain_context()`（`lib/sbi/sbi_domain_context.c`）は、GPR と S-mode の CSR は
+  入れ替えるが、**f0–f31 / fcsr は入れ替えない**
+- そのため TA の実行中に割り込みで Linux に戻り、Linux で浮動小数点演算が走ると、TA の値が壊れる
+  （逆方向の、Linux のユーザプロセスの FP 値が壊れることも起こりうる）
+
+OP-TEE のログを遅い端末に出していると TA の実行時間が延び、割り込みが入りやすくなるので再現しやすい。
+ログをファイルに出す場合は、Linux 側で FP 負荷（`awk` のループなど）をかけると再現した（15 回中 1 回）。
+
+**修正**: `patches/opensbi/0001-lib-sbi-domain-context-save-and-restore-FP-registers.patch`。
+ドメイン切り替えのたびに、現在のドメインの f0–f31 / fcsr を `hart_context` に保存し、切り替え先の値を読み込む。
+修正後は FP 負荷下で 40 回中 0 回の失敗、フル xtest も通過。
+
+再現・確認手順（ゲスト上）:
+
+```sh
+for c in 1 2; do (while :; do awk "BEGIN{x=0;for(i=0;i<3e6;i++)x+=i*1.5}"; done) & done
+f=0; for i in $(seq 40); do xtest regression_1006 >/dev/null 2>&1 || f=$((f+1)); done; echo fail=$f/40
+kill $(jobs -p); killall awk
+```
+
 ## 5. ゲスト上での確認コマンド
 
 ```sh
@@ -207,6 +252,17 @@ gcc -static hello.c -o hello
   （"latest" 以外は >= の緩いチェックにならない）。
 - `post-build.sh` は **dash** で実行される。`read -d` などの bash 拡張は使えない
   （`cp --parents` や `find -exec` で代用）。
+
+### OP-TEE / xtest
+- `xtest` の失敗理由は、ゲストの xtest 出力ではなく **OP-TEE のログ**（`E/TA:` 行）に出る。
+  `run-qemu.sh` のデフォルトでは Linux コンソールと同じ端末に混ざって表示される。
+- os_test TA の `test_mem_access_right` などには、`EMSG` を出さずに `TEE_ERROR_GENERIC`
+  を返す経路があるので、ログに理由が出ないこともある。
+- 間欠的な失敗の調査には、`-serial file:...` で OP-TEE ログをファイルに出す 2台目の QEMU
+  （ディスクイメージのコピー、別の ssh ポート・swtpm ディレクトリ）を起動すると、
+  使用中の環境を止めずに調べられる。
+- `make` を実行すると `output/images/sdcard.img` が再生成される。
+  そのイメージで起動中の QEMU があるなら、先に止めること。
 
 ### WSL 環境
 - `make` の前に必ず PATH を整理する（3章参照）。

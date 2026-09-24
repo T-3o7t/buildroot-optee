@@ -1,0 +1,98 @@
+From: lab_std24 <assnsmile2005@gmail.com>
+Subject: [PATCH] lib: sbi_domain_context: save and restore FP registers
+
+switch_to_next_domain_context() swaps the GPRs (trap context) and the
+S-mode CSRs but not f0-f31/fcsr, so the FP register file is shared
+between Linux and the OP-TEE domain.  OP-TEE's riscv port does not
+save FP state either (CFG_WITH_VFP is unsupported), while TAs are built
+hard-float (rv64imafdc/lp64d, CFG_TA_FLOAT_SUPPORT=y).  When a TA is
+preempted by a foreign interrupt and Linux runs FP code before the TA
+resumes, the TA's FP values are corrupted (and vice versa for Linux
+user tasks whose FP state is live in the registers).
+
+This shows up as an intermittent xtest regression_1006 failure:
+  E/TA: test_float:698 Expression my_dcmpeq(test_float_f2d(VAL1), VAL1,
+        FPREC) failed
+
+Save the current domain's FP registers and load the target domain's on
+every domain context switch.
+
+Signed-off-by: lab_std24 <assnsmile2005@gmail.com>
+---
+--- a/lib/sbi/sbi_domain_context.c	2026-09-24 15:34:41.948188507 +0900
++++ b/lib/sbi/sbi_domain_context.c	2026-09-24 15:35:00.520227928 +0900
+@@ -49,6 +49,13 @@
+ 	/** Supervisor resource management configuration register */
+ 	unsigned long srmcfg;
+ 
++#if __riscv_flen == 64
++	/** Floating-point registers f0-f31 */
++	u64 fregs[32];
++	/** Floating-point control and status register */
++	unsigned long fcsr;
++#endif
++
+ 	/** Reference to the owning domain */
+ 	struct sbi_domain *dom;
+ 	/** Previous context (caller) to jump to during context exits */
+@@ -88,6 +95,50 @@
+ 	hart_context_get(sbi_domain_thishart_ptr(),			\
+ 			 current_hartindex())
+ 
++#if __riscv_flen == 64
++#define FREG_OP(op, n)	#op " f" #n ", " #n "*8(%0)\n"
++#define FREGS_OP(op)							\
++	FREG_OP(op, 0)  FREG_OP(op, 1)  FREG_OP(op, 2)  FREG_OP(op, 3)	\
++	FREG_OP(op, 4)  FREG_OP(op, 5)  FREG_OP(op, 6)  FREG_OP(op, 7)	\
++	FREG_OP(op, 8)  FREG_OP(op, 9)  FREG_OP(op, 10) FREG_OP(op, 11)	\
++	FREG_OP(op, 12) FREG_OP(op, 13) FREG_OP(op, 14) FREG_OP(op, 15)	\
++	FREG_OP(op, 16) FREG_OP(op, 17) FREG_OP(op, 18) FREG_OP(op, 19)	\
++	FREG_OP(op, 20) FREG_OP(op, 21) FREG_OP(op, 22) FREG_OP(op, 23)	\
++	FREG_OP(op, 24) FREG_OP(op, 25) FREG_OP(op, 26) FREG_OP(op, 27)	\
++	FREG_OP(op, 28) FREG_OP(op, 29) FREG_OP(op, 30) FREG_OP(op, 31)
++
++/*
++ * The FP register file is shared by all domains on a hart. Neither Linux
++ * nor OP-TEE expects it to change across a domain switch, so save the
++ * current domain's f0-f31/fcsr and load the target domain's.
++ * mstatus.FS is forced on for the access and then put back; the target's
++ * FS state is restored with its sstatus afterwards.
++ */
++static void switch_fp_context(struct hart_context *ctx,
++			      struct hart_context *dom_ctx)
++{
++	unsigned long mstatus;
++
++	if (!misa_extension('D'))
++		return;
++
++	mstatus = csr_read_set(CSR_MSTATUS, MSTATUS_FS);
++
++	__asm__ __volatile__(FREGS_OP(fsd) : : "r"(ctx->fregs) : "memory");
++	ctx->fcsr = csr_read(CSR_FCSR);
++
++	__asm__ __volatile__(FREGS_OP(fld) : : "r"(dom_ctx->fregs) : "memory");
++	csr_write(CSR_FCSR, dom_ctx->fcsr);
++
++	csr_write(CSR_MSTATUS, mstatus);
++}
++#else
++static inline void switch_fp_context(struct hart_context *ctx,
++				     struct hart_context *dom_ctx)
++{
++}
++#endif
++
+ /**
+  * Switches the HART context from the current domain to the target domain.
+  * This includes changing domain assignments and reconfiguring PMP, as well
+@@ -126,6 +177,9 @@
+ 	sbi_hart_protection_unconfigure(scratch);
+ 	sbi_hart_protection_configure(scratch);
+ 
++	/* Save current FP registers and restore target domain's */
++	switch_fp_context(ctx, dom_ctx);
++
+ 	/* Save current CSR context and restore target domain's CSR context */
+ 	ctx->sstatus	= csr_swap(CSR_SSTATUS, dom_ctx->sstatus);
+ 	ctx->sie	= csr_swap(CSR_SIE, dom_ctx->sie);
