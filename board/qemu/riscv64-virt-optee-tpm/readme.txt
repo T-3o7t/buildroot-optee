@@ -6,12 +6,23 @@ Start a TPM 2.0 emulator first (the guest's tpm-tis-device is backed by it):
   swtpm socket --tpmstate dir=/tmp/emulated_tpm_optee \
       --ctrl type=unixio,path=/tmp/emulated_tpm_optee/swtpm-sock --tpm2 --log level=20 &
 
-Then run Linux in emulation with (or use output/images/run-qemu.sh, which does both):
+Then run Linux in emulation with (or use board/qemu/riscv64-virt-optee-tpm/run-qemu.sh,
+which does both; see below):
 
   qemu-system-riscv64 -M virt -cpu rv64,zkr=on -dtb qemu_rv64_virt_domain.dtb -m 4096 -smp 2 -semihosting-config enable=on,target=native -serial tcp:127.0.0.1:64320,server -bios u-boot-spl -device loader,file=u-boot.itb,addr=0x80200000 -device virtio-blk-device,drive=hd0 -drive format=raw,file=sdcard.img,id=hd0,if=none -device virtio-net-pci,netdev=net0 -netdev user,id=net0,hostfwd=tcp::2200-:22 -chardev socket,id=chrtpm,path=/tmp/emulated_tpm_optee/swtpm-sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device tpm-tis-device,tpmdev=tpm0 -nographic # qemu_riscv64_virt_optee_tpm_defconfig
 
-OP-TEE core log goes to QEMU's stdout via semihosting; the Linux console is on
-TCP port 64320 (connect with e.g. "nc 127.0.0.1 64320" from another terminal).
+With the command above, OP-TEE core log goes to QEMU's stdout via semihosting and
+the Linux console is on TCP port 64320 (connect with e.g. "nc 127.0.0.1 64320"
+from another terminal).  output/images/start-qemu.sh is generated from it.
+
+run-qemu.sh (run from anywhere; it cds into output/images and reuses or starts swtpm):
+  run-qemu.sh               Linux console and OP-TEE log both on this terminal
+                            (-serial mon:stdio)
+  run-qemu.sh --tcp-serial  Linux console on tcp:127.0.0.1:64320, as above
+  run-qemu.sh --debug       start halted with a gdb stub on tcp::4680
+  Env overrides: SSH_PORT (2200), QEMU_MEM (4096), QEMU_SMP (2), TPM_DIR,
+  IMAGES, QEMU.  QEMU_MEM/QEMU_SMP must match the DTS / CFG_TEE_CORE_NB_CORE.
+
 Login: root / sifive. ssh: ssh -p 2200 root@localhost
 
 Copying files in/out (scp/sftp):
