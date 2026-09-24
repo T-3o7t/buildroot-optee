@@ -1,0 +1,21 @@
+config BR2_PACKAGE_OPTEE_SELFTEST
+	bool "optee-selftest (custom TA + host test app)"
+	depends on BR2_TARGET_OPTEE_OS
+	depends on BR2_TOOLCHAIN_HAS_THREADS # optee-client
+	depends on !BR2_STATIC_LIBS # optee-client
+	depends on BR2_USE_MMU # optee-client
+	select BR2_PACKAGE_OPTEE_CLIENT
+	select BR2_TARGET_OPTEE_OS_SDK
+	help
+	  A small custom Trusted Application and its host client used to
+	  verify the OP-TEE stack end to end: value passing, an in-TEE
+	  SHA-256 (GlobalPlatform crypto API) checked against the FIPS
+	  test vector, and the secure-world TRNG.
+
+	  Installs the TA as /lib/optee_armtz/<uuid>.ta and the client as
+	  /usr/bin/optee_selftest (prints PASS/FAIL per check).
+
+comment "optee-selftest needs a toolchain w/ threads, dynamic library"
+	depends on BR2_TARGET_OPTEE_OS
+	depends on BR2_USE_MMU
+	depends on !BR2_TOOLCHAIN_HAS_THREADS || BR2_STATIC_LIBS
