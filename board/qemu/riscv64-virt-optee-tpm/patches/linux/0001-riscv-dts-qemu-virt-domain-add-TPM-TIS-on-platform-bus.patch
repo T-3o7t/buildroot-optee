@@ -10,14 +10,22 @@ QEMU skips that and the DTB must carry the node itself.
 The node matches what QEMU generates (dtc -I dtb of "-machine
 dumpdtb=") for the first platform-bus slot.
 
-tpm_event_log_addr/size are consumed by U-Boot's measured boot
-(lib/tpm_tcg2.c tcg2_platform_get_log()); without them bootm_measure()
-silently measures nothing.  0x82400000/64KiB sits between U-Boot's
-TEXT_BASE (0x81200000) and kernel_addr_r (0x84000000).
+The TCG2 event log buffer is described with "memory-region" pointing
+at a /reserved-memory node, which both sides understand:
+ - U-Boot's measured boot (lib/tpm_tcg2.c tcg2_platform_get_log())
+   writes the log there; without a log buffer bootm_measure() silently
+   measures nothing.
+ - Linux (drivers/char/tpm/eventlog/of.c tpm_read_log_memory_region())
+   exposes it as /sys/kernel/security/tpm0/binary_bios_measurements.
+U-Boot-only "tpm_event_log_addr/size" would work for U-Boot but leave
+Linux without the log.  The region is reserved (but mapped) so Linux
+does not reuse it before the TPM driver copies the log.
+0x82400000/64KiB sits between U-Boot's TEXT_BASE (0x81200000) and
+kernel_addr_r (0x84000000).
 
 --- a/arch/riscv/boot/dts/qemu/qemu_rv64_virt_domain.dts
 +++ b/arch/riscv/boot/dts/qemu/qemu_rv64_virt_domain.dts
-@@ -26,6 +26,14 @@
+@@ -26,6 +26,24 @@
  		#address-cells = <0x01>;
  		#size-cells = <0x01>;
  		compatible = "qemu,platform\0simple-bus";
@@ -26,8 +34,18 @@ TEXT_BASE (0x81200000) and kernel_addr_r (0x84000000).
 +		tpm_tis@0 {
 +			reg = <0x00 0x5000>;
 +			compatible = "tcg,tpm-tis-mmio";
-+			tpm_event_log_addr = <0x0 0x82400000>;
-+			tpm_event_log_size = <0x10000>;
++			memory-region = <&tpm_event_log>;
++		};
++	};
++
++	reserved-memory {
++		#address-cells = <0x02>;
++		#size-cells = <0x02>;
++		ranges;
++
++		/* TCG2 event log: written by U-Boot measured boot, read by Linux */
++		tpm_event_log: tpm-event-log@82400000 {
++			reg = <0x00 0x82400000 0x00 0x10000>;
 +		};
  	};
  

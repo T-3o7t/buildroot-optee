@@ -57,7 +57,13 @@ TPM check in the guest:
   cat /sys/kernel/security/ima/ascii_runtime_measurements   # IMA (ima_policy=tcb), PCR10
 
 U-Boot measured boot (uboot-tpm.config + patches/uboot/): PCR8 <- kernel,
-PCR9 <- initrd (none: hash of "initrd\0"), PCR1 <- bootargs, PCR0 <- separators.
+PCR9 <- initrd (none: hash of "initrd\0"), PCR1 <- DTB file + bootargs,
+PCR0 <- U-Boot version string, PCR0-7 <- separators (0xffffffff; nothing else
+is measured into PCR2-7, so they all read E21B703E...).
+The TCG2 event log lives in a /reserved-memory region (0x82400000, 64KiB) that
+the TPM node points at with memory-region, so U-Boot writes it and Linux shows it:
+  tpm2_eventlog /sys/kernel/security/tpm0/binary_bios_measurements
+(its replayed "pcrs:" must equal tpm2_pcrread sha256:0-9).
 PCR8 is reproducible from output/images/Image; check it on the host with:
 
   python3 - <<'PY'
